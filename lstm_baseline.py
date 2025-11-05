@@ -7,7 +7,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def set_seed(seed=42):
-    """Fija todas las seeds para reproducibilidad"""
+    """Fija todas las seeds para reproducibilidad (Nota: no garantiza 100% reproducibilidad en GPU)"""
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
@@ -135,7 +135,7 @@ def create_sequences_grouped(data, seq_len=8, verbose=True):
     
     return np.array(X), np.array(y).reshape(-1, 1)
 
-
+# Dataset
 class WalmartDataset(Dataset):
     """Dataset identico al original"""
     def __init__(self, X, y):
@@ -161,6 +161,10 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
     # Fijar seed al inicio
     set_seed(seed)
     
+    # Crear generator para DataLoader
+    g = torch.Generator()
+    g.manual_seed(seed)
+    
     # DataLoaders
     train_dataset = WalmartDataset(X_train, y_train)
     val_dataset = WalmartDataset(X_val, y_val)
@@ -171,7 +175,8 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
         shuffle=True, 
         drop_last=True,
         num_workers=0,
-        pin_memory=True
+        pin_memory=True,
+        generator=g
     )
     val_loader = DataLoader(
         val_dataset, 
@@ -231,7 +236,7 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
     
     # Training loop
     best_val_loss = float('inf')
-    patience = 15
+    patience = 20
     patience_counter = 0
     train_losses = []
     val_losses = []
@@ -306,7 +311,7 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
         # Early stopping
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), 'lstm_best.pt')
+            torch.save(model.state_dict(), f'lstm_temp_seed_{seed}.pt')
             patience_counter = 0
         else:
             patience_counter += 1
@@ -315,12 +320,12 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
                 break
     
     # Cargar mejor modelo
-    model.load_state_dict(torch.load('lstm_best.pt'))
+    model.load_state_dict(torch.load(f'lstm_temp_seed_{seed}.pt'))
     
     return model, train_losses, val_losses
 
 # 4. Evaluación
-def evaluate_lstm(model, X_test, y_test, scaler=None, verbose=True, seed=42):
+def evaluate_lstm(model, X_test, y_test, is_holiday=None, scaler=None, verbose=True):
     """Evalua con diagnosticos detallados"""
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -355,11 +360,20 @@ def evaluate_lstm(model, X_test, y_test, scaler=None, verbose=True, seed=42):
     # Eliminar negativos
     predictions = np.maximum(predictions, 0)
     
+    # Preparar weights para WMAE
+    # w = 5 si es semana festiva, 1 en caso contrario
+    if is_holiday is not None:
+        if len(is_holiday.shape) == 1:
+            is_holiday = is_holiday.reshape(-1, 1)
+        weights = np.where(is_holiday == 1, 5.0, 1.0)
+    else:
+        weights = np.ones_like(y_test)
+    
     # Métricas
     mae = np.mean(np.abs(y_test - predictions))
     rmse = np.sqrt(np.mean((y_test - predictions)**2))
     wmape = np.sum(np.abs(y_test - predictions)) / np.sum(np.abs(y_test)) * 100
-    wmae = np.sum(np.abs(y_test - predictions) * np.abs(y_test)) / np.sum(np.abs(y_test))
+    wmae = np.sum(weights * np.abs(y_test - predictions)) / np.sum(weights)
     
     threshold = 100
     mask = y_test > threshold
@@ -381,6 +395,14 @@ def evaluate_lstm(model, X_test, y_test, scaler=None, verbose=True, seed=42):
     print(f"WMAPE:  {wmape:.2f}%")
     print(f"MAPE:   {mape:.2f}% (solo ventas >${threshold})")
     print(f"R²:     {r2:.4f}")
+    
+    if is_holiday is not None:
+        n_holidays = np.sum(is_holiday == 1)
+        n_regular = np.sum(is_holiday == 0)
+        print(f"\nPesos WMAE:")
+        print(f"- Semanas festivas (w=5): {n_holidays:,} ({n_holidays/len(is_holiday)*100:.1f}%)")
+        print(f"- Semanas regulares (w=1): {n_regular:,} ({n_regular/len(is_holiday)*100:.1f}%)")
+    
     print(f"\nRango predicciones: [${predictions.min():,.2f}, ${predictions.max():,.2f}]")
     print(f"Rango reales:       [${y_test.min():,.2f}, ${y_test.max():,.2f}]")
     print(f"Media predicciones: ${predictions.mean():,.2f}")
@@ -406,7 +428,6 @@ def evaluate_lstm(model, X_test, y_test, scaler=None, verbose=True, seed=42):
         'mae': mae,
         'rmse': rmse,
         'r2': r2,
-        'seed': seed,
         'predictions': predictions,
         'actuals': y_test
     }
@@ -415,6 +436,10 @@ def evaluate_lstm(model, X_test, y_test, scaler=None, verbose=True, seed=42):
 if __name__ == "__main__":
     import pickle
     import json
+    import os
+    
+    # Seeds a probar
+    SEEDS = [42, 123, 456, 789, 1024]
     
     # Cargar datos
     print("\nCargando datos:")
@@ -433,12 +458,16 @@ if __name__ == "__main__":
     # Verificar orden de columnas
     store_idx = feature_names.index('Store')
     dept_idx = feature_names.index('Dept')
+    isholiday_idx = feature_names.index('IsHoliday')  # Guardar índice de IsHoliday
     other_indices = [i for i in range(len(feature_names)) if i not in [store_idx, dept_idx]]
     new_order = other_indices + [store_idx, dept_idx]
     
     X_train = X_train[:, new_order]
     X_val = X_val[:, new_order]
     feature_names = [feature_names[i] for i in new_order]
+    
+    # Actualizar índice de IsHoliday después del reordenamiento
+    isholiday_idx = feature_names.index('IsHoliday')
     
     # Convertir a 0-based
     store_min = X_train[:, -2].min()
@@ -462,7 +491,7 @@ if __name__ == "__main__":
     y_train = y_train[mask_train]
     X_val = X_val[mask_val]
     y_val = y_val[mask_val]
-    print(f"- X_train: {X_train.shape})")
+    print(f"- X_train: {X_train.shape}")
     print(f"- X_val: {X_val.shape}")
     
     # Normalización
@@ -493,32 +522,98 @@ if __name__ == "__main__":
     print(f"- Train: {X_train_seq.shape}")
     print(f"- Val: {X_val_seq.shape}")
     
-    # Entrenar    
-    model, train_losses, val_losses = train_lstm_forecaster(
-        X_train_seq, y_train_seq, 
-        X_val_seq, y_val_seq,
-        n_stores=n_stores,
-        n_depts=n_depts,
-        seq_len=SEQ_LEN,
-        epochs=100,
-        batch_size=128, # Aumentado de 64
-        lr=0.001        # Aumentado de 0.0001
-    )
+    # Extraer IsHoliday para WMAE
+    print(f"\nExtrayendo IsHoliday (índice {isholiday_idx}) para cálculo de WMAE:")
+    # Tomar IsHoliday del último timestep de cada secuencia
+    is_holiday_val = X_val_seq[:, -1, isholiday_idx]
+    print(f"- Total muestras val: {len(is_holiday_val):,}")
+    print(f"- Semanas festivas: {np.sum(is_holiday_val == 1):,} ({np.sum(is_holiday_val == 1)/len(is_holiday_val)*100:.1f}%)")
+    print(f"- Semanas regulares: {np.sum(is_holiday_val == 0):,} ({np.sum(is_holiday_val == 0)/len(is_holiday_val)*100:.1f}%)")
     
-    # Evaluar   
-    results = evaluate_lstm(model, X_val_seq, y_val_seq, scaler=scaler_y, verbose=True)
+    # Entrenar con múltiples seeds
+    all_results = []
+    best_mape = float('inf')
+    best_seed = None
     
-    # Guardar
-    print(f"\nAnalisis completado")
-    with open('lstm_results.json', 'w') as f:
+    for seed in SEEDS:
+        print(f"\n{'='*70}")
+        print(f"Entrenando con seed={seed}")
+        print(f"{'='*70}")
+        
+        model, train_losses, val_losses = train_lstm_forecaster(
+            X_train_seq, y_train_seq, 
+            X_val_seq, y_val_seq,
+            n_stores=n_stores,
+            n_depts=n_depts,
+            seq_len=SEQ_LEN,
+            epochs=100,
+            batch_size=128,
+            lr=0.001,
+            seed=seed
+        )
+        
+        results = evaluate_lstm(model, X_val_seq, y_val_seq, is_holiday=is_holiday_val, 
+                               scaler=scaler_y, verbose=True)
+        all_results.append(results)
+        
+        # Guardar modelo si es el mejor
+        if results['mape'] < best_mape:
+            best_mape = results['mape']
+            best_seed = seed
+            torch.save(model.state_dict(), 'lstm_best.pt')
+            print(f"\n>>> Mejor modelo hasta ahora (seed={seed}, MAPE={best_mape:.2f}%)")
+        
+        # Guardar resultado individual
+        with open(f'lstm_results_seed_{seed}.json', 'w') as f:
+            json.dump({
+                'seed': seed,
+                'wmape': float(results['wmape']),
+                'wmae': float(results['wmae']),
+                'mape': float(results['mape']),
+                'mae': float(results['mae']),
+                'rmse': float(results['rmse']),
+                'r2': float(results['r2'])
+            }, f, indent=4)
+    
+    # Resumen de todos los seeds
+    print(f"\n{'='*70}")
+    print(f"Resumen de {len(SEEDS)} seeds")
+    print(f"{'='*70}")
+    
+    mapes = [r['mape'] for r in all_results]
+    wmapes = [r['wmape'] for r in all_results]
+    maes = [r['mae'] for r in all_results]
+    
+    print(f"\nMAPE: {np.mean(mapes):.2f}% ± {np.std(mapes):.2f}%")
+    print(f"- Min: {np.min(mapes):.2f}% (seed={SEEDS[np.argmin(mapes)]})")
+    print(f"- Max: {np.max(mapes):.2f}% (seed={SEEDS[np.argmax(mapes)]})")
+    
+    print(f"\nWMAPE: {np.mean(wmapes):.2f}% ± {np.std(wmapes):.2f}%")
+    print(f"\nMAE: ${np.mean(maes):,.2f} ± ${np.std(maes):,.2f}")
+    
+    # Limpiar archivos temporales
+    # for seed in SEEDS:
+    #    temp_file = f'lstm_temp_seed_{seed}.pt'
+    #    if os.path.exists(temp_file):
+    #        os.remove(temp_file)
+    
+    print(f"\nMejor modelo guardado: lstm_best.pt (seed={best_seed}, MAPE={best_mape:.2f}%)")
+    
+    # Guardar resumen
+    with open('lstm_results_summary.json', 'w') as f:
         json.dump({
-            'wmape': float(results['wmape']),
-            'wmae': float(results['wmae']),
-            'mape': float(results['mape']),
-            'mae': float(results['mae']),
-            'rmse': float(results['rmse']),
-            'r2': float(results['r2']),
+            'seeds': SEEDS,
+            'best_seed': int(best_seed),
+            'best_mape': float(best_mape),
+            'mape_mean': float(np.mean(mapes)),
+            'mape_std': float(np.std(mapes)),
+            'wmape_mean': float(np.mean(wmapes)),
+            'wmape_std': float(np.std(wmapes)),
+            'mae_mean': float(np.mean(maes)),
+            'mae_std': float(np.std(maes)),
         }, f, indent=4)
     
-    print(f"- Modelo: lstm_best.pt")
-    print(f"- Resultados: lstm_results.json")
+    print(f"\nArchivos generados:")
+    print(f"- lstm_best.pt (mejor modelo)")
+    print(f"- lstm_results_seed_*.json (resultados individuales)")
+    print(f"- lstm_results_summary.json (resumen)")
