@@ -1,3 +1,6 @@
 mas_info.ipynb
+sampleSubmission.csv
 *.pt
 *.pkl
+*.pyc
+__pycache__/
