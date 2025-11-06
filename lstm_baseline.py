@@ -174,7 +174,7 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val, n_stores, n_depts,
     dept_emb_dim = min(50, max(16, int(np.sqrt(n_depts)) * 2))
     
     print(f"\n{'='*70}")
-    print(f"Configuración del modelo")
+    print(f"Configuración del modelo LSTM")
     print(f"{'='*70}")
     print(f"\n- Input size (sin Store/Dept): {input_size}")
     print(f"- n_stores: {n_stores}, embedding_dim: {store_emb_dim}")
