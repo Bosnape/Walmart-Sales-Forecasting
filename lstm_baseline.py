@@ -6,14 +6,6 @@ from sklearn.preprocessing import RobustScaler
 import warnings
 warnings.filterwarnings('ignore')
 
-def set_seed(seed=42):
-    """Fija todas las seeds para reproducibilidad (Nota: no garantiza 100% reproducibilidad en GPU)"""
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
 # Modelo LSTM
 class LSTMForecaster(nn.Module):
     """LSTM con embeddings para Store y Dept"""
@@ -22,12 +14,12 @@ class LSTMForecaster(nn.Module):
         input_size,
         n_stores=45,
         n_depts=99,
-        store_emb_dim=20,      # Aumentado de 16
-        dept_emb_dim=20,       # Aumentado de 16
-        hidden_size=256,       # Aumentado de 128
-        num_layers=3,          # Aumentado de 2
-        dropout=0.3,           # Igual
-        seq_len=8              # Aumentado de 4
+        store_emb_dim=20,
+        dept_emb_dim=20,
+        hidden_size=256,
+        num_layers=3,
+        dropout=0.3,
+        seq_len=8
     ):
         super().__init__()
         
@@ -137,7 +129,7 @@ def create_sequences_grouped(data, seq_len=8, verbose=True):
 
 # Dataset
 class WalmartDataset(Dataset):
-    """Dataset identico al original"""
+    """Dataset para Walmart"""
     def __init__(self, X, y):
         self.X = torch.FloatTensor(X)
         self.y = torch.FloatTensor(y)
@@ -148,22 +140,14 @@ class WalmartDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-# 3. Training
+# Training
 def train_lstm_forecaster(X_train, y_train, X_val, y_val, 
-                                  n_stores, n_depts,
-                                  seq_len=8,           # Aumentado de 4
-                                  epochs=100, 
-                                  batch_size=128,      # Aumentado de 64
-                                  lr=0.001,
-                                  seed=42):           # Aumentado de 0.0001               
+                          n_stores, n_depts,
+                          seq_len=8,
+                          epochs=100, 
+                          batch_size=128,
+                          lr=0.001):
     """Entrena LSTM con diagnosticos detallados"""
-    
-    # Fijar seed al inicio
-    set_seed(seed)
-    
-    # Crear generator para DataLoader
-    g = torch.Generator()
-    g.manual_seed(seed)
     
     # DataLoaders
     train_dataset = WalmartDataset(X_train, y_train)
@@ -175,12 +159,11 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
         shuffle=True, 
         drop_last=True,
         num_workers=0,
-        pin_memory=True,
-        generator=g
+        pin_memory=True
     )
     val_loader = DataLoader(
         val_dataset, 
-        batch_size=batch_size * 2,  # Val puede ser más grande
+        batch_size=batch_size * 2,
         shuffle=False, 
         drop_last=False,
         num_workers=0,
@@ -189,13 +172,13 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Model config (embeddings más grandes basados en sqrt)
+    # Model config
     input_size = X_train.shape[2] - 2
     store_emb_dim = min(50, max(16, int(np.sqrt(n_stores)) * 3))
     dept_emb_dim = min(50, max(16, int(np.sqrt(n_depts)) * 2))
     
     print(f"\n{'='*70}")
-    print(f"Configuracion del modelo")
+    print(f"Configuración del modelo")
     print(f"{'='*70}")
     print(f"\n- Input size (sin Store/Dept): {input_size}")
     print(f"- n_stores: {n_stores}, embedding_dim: {store_emb_dim}")
@@ -205,6 +188,7 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
     print(f"- Seq_len: {seq_len}")
     print(f"- Batch size: {batch_size}")
     print(f"- Learning rate: {lr}")
+    print(f"- Device: {device}")
     
     model = LSTMForecaster(
         input_size=input_size,
@@ -227,7 +211,7 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4, betas=(0.9, 0.999))
     
-    # Scheduler mejorado con CosineAnnealing
+    # Scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=10, T_mult=2, eta_min=1e-6
     )
@@ -268,7 +252,7 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
         train_loss /= len(train_loader)
         train_losses.append(train_loss)
         
-        # Vaidation
+        # Validation
         model.eval()
         val_loss = 0
         val_preds = []
@@ -311,7 +295,7 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
         # Early stopping
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), f'lstm_temp_seed_{seed}.pt')
+            torch.save(model.state_dict(), 'lstm_best_model.pt')
             patience_counter = 0
         else:
             patience_counter += 1
@@ -320,11 +304,11 @@ def train_lstm_forecaster(X_train, y_train, X_val, y_val,
                 break
     
     # Cargar mejor modelo
-    model.load_state_dict(torch.load(f'lstm_temp_seed_{seed}.pt'))
+    model.load_state_dict(torch.load('lstm_best_model.pt'))
     
     return model, train_losses, val_losses
 
-# 4. Evaluación
+# Evaluación
 def evaluate_lstm(model, X_test, y_test, is_holiday=None, scaler=None, verbose=True):
     """Evalua con diagnosticos detallados"""
     
@@ -361,7 +345,6 @@ def evaluate_lstm(model, X_test, y_test, is_holiday=None, scaler=None, verbose=T
     predictions = np.maximum(predictions, 0)
     
     # Preparar weights para WMAE
-    # w = 5 si es semana festiva, 1 en caso contrario
     if is_holiday is not None:
         if len(is_holiday.shape) == 1:
             is_holiday = is_holiday.reshape(-1, 1)
@@ -436,10 +419,6 @@ def evaluate_lstm(model, X_test, y_test, is_holiday=None, scaler=None, verbose=T
 if __name__ == "__main__":
     import pickle
     import json
-    import os
-    
-    # Seeds a probar
-    SEEDS = [42, 123, 456, 789, 1024]
     
     # Cargar datos
     print("\nCargando datos:")
@@ -458,7 +437,7 @@ if __name__ == "__main__":
     # Verificar orden de columnas
     store_idx = feature_names.index('Store')
     dept_idx = feature_names.index('Dept')
-    isholiday_idx = feature_names.index('IsHoliday')  # Guardar índice de IsHoliday
+    isholiday_idx = feature_names.index('IsHoliday')
     other_indices = [i for i in range(len(feature_names)) if i not in [store_idx, dept_idx]]
     new_order = other_indices + [store_idx, dept_idx]
     
@@ -510,7 +489,7 @@ if __name__ == "__main__":
     train_data_scaled = np.concatenate([X_train_scaled, y_train_scaled], axis=1)
     val_data_scaled = np.concatenate([X_val_scaled, y_val_scaled], axis=1)
     
-    # Crear secuencias con SEQ_LEN=8
+    # Crear secuencias
     SEQ_LEN = 8
     print(f"\nCreando secuencias (seq_len={SEQ_LEN}):")
     print(f"\n1. Train:")
@@ -524,96 +503,38 @@ if __name__ == "__main__":
     
     # Extraer IsHoliday para WMAE
     print(f"\nExtrayendo IsHoliday (índice {isholiday_idx}) para cálculo de WMAE:")
-    # Tomar IsHoliday del último timestep de cada secuencia
     is_holiday_val = X_val_seq[:, -1, isholiday_idx]
     print(f"- Total muestras val: {len(is_holiday_val):,}")
     print(f"- Semanas festivas: {np.sum(is_holiday_val == 1):,} ({np.sum(is_holiday_val == 1)/len(is_holiday_val)*100:.1f}%)")
     print(f"- Semanas regulares: {np.sum(is_holiday_val == 0):,} ({np.sum(is_holiday_val == 0)/len(is_holiday_val)*100:.1f}%)")
     
-    # Entrenar con múltiples seeds
-    all_results = []
-    best_mape = float('inf')
-    best_seed = None
+    # Entrenar modelo
+    model, train_losses, val_losses = train_lstm_forecaster(
+        X_train_seq, y_train_seq, 
+        X_val_seq, y_val_seq,
+        n_stores=n_stores,
+        n_depts=n_depts,
+        seq_len=SEQ_LEN,
+        epochs=100,
+        batch_size=128,
+        lr=0.001
+    )
     
-    for seed in SEEDS:
-        print(f"\n{'='*70}")
-        print(f"Entrenando con seed={seed}")
-        print(f"{'='*70}")
-        
-        model, train_losses, val_losses = train_lstm_forecaster(
-            X_train_seq, y_train_seq, 
-            X_val_seq, y_val_seq,
-            n_stores=n_stores,
-            n_depts=n_depts,
-            seq_len=SEQ_LEN,
-            epochs=100,
-            batch_size=128,
-            lr=0.001,
-            seed=seed
-        )
-        
-        results = evaluate_lstm(model, X_val_seq, y_val_seq, is_holiday=is_holiday_val, 
-                               scaler=scaler_y, verbose=True)
-        all_results.append(results)
-        
-        # Guardar modelo si es el mejor
-        if results['mape'] < best_mape:
-            best_mape = results['mape']
-            best_seed = seed
-            torch.save(model.state_dict(), 'lstm_best.pt')
-            print(f"\n>>> Mejor modelo hasta ahora (seed={seed}, MAPE={best_mape:.2f}%)")
-        
-        # Guardar resultado individual
-        with open(f'lstm_results_seed_{seed}.json', 'w') as f:
-            json.dump({
-                'seed': seed,
-                'wmape': float(results['wmape']),
-                'wmae': float(results['wmae']),
-                'mape': float(results['mape']),
-                'mae': float(results['mae']),
-                'rmse': float(results['rmse']),
-                'r2': float(results['r2'])
-            }, f, indent=4)
+    # Evaluar
+    results = evaluate_lstm(model, X_val_seq, y_val_seq, is_holiday=is_holiday_val, 
+                           scaler=scaler_y, verbose=True)
     
-    # Resumen de todos los seeds
-    print(f"\n{'='*70}")
-    print(f"Resumen de {len(SEEDS)} seeds")
-    print(f"{'='*70}")
-    
-    mapes = [r['mape'] for r in all_results]
-    wmapes = [r['wmape'] for r in all_results]
-    maes = [r['mae'] for r in all_results]
-    
-    print(f"\nMAPE: {np.mean(mapes):.2f}% ± {np.std(mapes):.2f}%")
-    print(f"- Min: {np.min(mapes):.2f}% (seed={SEEDS[np.argmin(mapes)]})")
-    print(f"- Max: {np.max(mapes):.2f}% (seed={SEEDS[np.argmax(mapes)]})")
-    
-    print(f"\nWMAPE: {np.mean(wmapes):.2f}% ± {np.std(wmapes):.2f}%")
-    print(f"\nMAE: ${np.mean(maes):,.2f} ± ${np.std(maes):,.2f}")
-    
-    # Limpiar archivos temporales
-    # for seed in SEEDS:
-    #    temp_file = f'lstm_temp_seed_{seed}.pt'
-    #    if os.path.exists(temp_file):
-    #        os.remove(temp_file)
-    
-    print(f"\nMejor modelo guardado: lstm_best.pt (seed={best_seed}, MAPE={best_mape:.2f}%)")
-    
-    # Guardar resumen
-    with open('lstm_results_summary.json', 'w') as f:
+    # Guardar resultados
+    with open('lstm_results.json', 'w') as f:
         json.dump({
-            'seeds': SEEDS,
-            'best_seed': int(best_seed),
-            'best_mape': float(best_mape),
-            'mape_mean': float(np.mean(mapes)),
-            'mape_std': float(np.std(mapes)),
-            'wmape_mean': float(np.mean(wmapes)),
-            'wmape_std': float(np.std(wmapes)),
-            'mae_mean': float(np.mean(maes)),
-            'mae_std': float(np.std(maes)),
+            'wmape': float(results['wmape']),
+            'wmae': float(results['wmae']),
+            'mape': float(results['mape']),
+            'mae': float(results['mae']),
+            'rmse': float(results['rmse']),
+            'r2': float(results['r2'])
         }, f, indent=4)
     
     print(f"\nArchivos generados:")
-    print(f"- lstm_best.pt (mejor modelo)")
-    print(f"- lstm_results_seed_*.json (resultados individuales)")
-    print(f"- lstm_results_summary.json (resumen)")
+    print(f"- lstm_best_model.pt (mejor modelo)")
+    print(f"- lstm_results.json (resultados)")
