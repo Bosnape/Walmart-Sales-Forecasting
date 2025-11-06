@@ -40,12 +40,12 @@ class TransformerForecaster(nn.Module):
         n_depts=99,
         store_emb_dim=20,
         dept_emb_dim=20,
-        d_model=128,
+        d_model=256,  # Aumentado de 128
         nhead=4,
-        num_encoder_layers=2,
-        num_decoder_layers=2,
-        dim_feedforward=256,
-        dropout=0.2,
+        num_encoder_layers=3,
+        num_decoder_layers=3,
+        dim_feedforward=512,  # Aumentado de 256
+        dropout=0.15,  # Reducido de 0.2
         seq_len=8
     ):
         super().__init__()
@@ -53,14 +53,21 @@ class TransformerForecaster(nn.Module):
         self.d_model = d_model
         self.seq_len = seq_len
         
-        # Embeddings para Store y Dept
+        # Embeddings para Store y Dept con normalización
         self.store_embedding = nn.Embedding(n_stores, store_emb_dim)
         self.dept_embedding = nn.Embedding(n_depts, dept_emb_dim)
         
-        # Input projection: convertir features a d_model
-        self.input_projection = nn.Linear(input_size + store_emb_dim + dept_emb_dim, d_model)
+        # Initialize embeddings mejor
+        nn.init.normal_(self.store_embedding.weight, mean=0, std=0.01)
+        nn.init.normal_(self.dept_embedding.weight, mean=0, std=0.01)
         
-        # Positional encoding
+        # Input projection con LayerNorm
+        self.input_projection = nn.Sequential(
+            nn.Linear(input_size + store_emb_dim + dept_emb_dim, d_model),
+            nn.LayerNorm(d_model)
+        )
+        
+        # Positional encoding para encoder
         self.pos_encoder = PositionalEncoding(d_model, dropout=dropout)
         
         # Transformer encoder
@@ -69,9 +76,23 @@ class TransformerForecaster(nn.Module):
             nhead=nhead,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
-            batch_first=True
+            batch_first=True,
+            norm_first=True  # Pre-LN (más estable)
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer, 
+            num_layers=num_encoder_layers,
+            norm=nn.LayerNorm(d_model)  # Final norm
+        )
+        
+        # Decoder usa la última secuencia como query inicial
+        self.decoder_projection = nn.Sequential(
+            nn.Linear(input_size + store_emb_dim + dept_emb_dim, d_model),
+            nn.LayerNorm(d_model)
+        )
+        
+        # Positional encoding para decoder
+        self.pos_decoder = PositionalEncoding(d_model, dropout=dropout)
         
         # Transformer decoder
         decoder_layer = nn.TransformerDecoderLayer(
@@ -79,26 +100,42 @@ class TransformerForecaster(nn.Module):
             nhead=nhead,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
-            batch_first=True
+            batch_first=True,
+            norm_first=True
         )
-        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_decoder_layers)
-        
-        # Query para decoder (aprendible)
-        self.decoder_query = nn.Parameter(torch.randn(1, 1, d_model))
+        self.transformer_decoder = nn.TransformerDecoder(
+            decoder_layer, 
+            num_layers=num_decoder_layers,
+            norm=nn.LayerNorm(d_model)
+        )
         
         # Output projection
         self.fc_out = nn.Sequential(
             nn.Linear(d_model, d_model // 2),
-            nn.ReLU(),
+            nn.LayerNorm(d_model // 2),
+            nn.GELU(),  # Mejor que ReLU para transformers
             nn.Dropout(dropout),
-            nn.Linear(d_model // 2, 1)
+            nn.Linear(d_model // 2, d_model // 4),
+            nn.LayerNorm(d_model // 4),
+            nn.GELU(),
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(d_model // 4, 1)
         )
+        
+        # Initialize weights
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Inicialización Xavier para mejor convergencia"""
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
         
     def forward(self, x):
         # x: (batch, seq_len, features)
         batch_size = x.size(0)
         
-        # Extraer Store y Dept (ultimas 2 columnas)
+        # Extraer Store y Dept (últimas 2 columnas)
         store_ids = x[:, :, -2].long()
         dept_ids = x[:, :, -1].long()
         x_numeric = x[:, :, :-2]
@@ -119,10 +156,13 @@ class TransformerForecaster(nn.Module):
         # Encoder
         memory = self.transformer_encoder(x_encoded)
         
-        # Decoder (usamos query aprendible)
-        tgt = self.decoder_query.expand(batch_size, 1, -1)  # (batch, 1, d_model)
+        # Decoder: Usar última posición de la secuencia como query
+        # Esto da contexto temporal al decoder
+        last_step = x_combined[:, -1:, :]  # (batch, 1, input_combined)
+        tgt = self.decoder_projection(last_step)
+        tgt = self.pos_decoder(tgt)
         
-        # Decodificar
+        # Decodificar con atención al encoder
         decoder_output = self.transformer_decoder(tgt, memory)
         
         # Output projection
@@ -192,7 +232,7 @@ class WalmartDataset(Dataset):
 
 # Training
 def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_depts,
-                                 seq_len=8, epochs=100, batch_size=128,lr=0.001):
+                                 seq_len=8, epochs=100, batch_size=256, lr=0.0005):
     """Entrena Transformer con diagnosticos detallados"""
     
     # DataLoaders
@@ -220,8 +260,8 @@ def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_dep
     
     # Model config
     input_size = X_train.shape[2] - 2
-    store_emb_dim = min(50, max(16, int(np.sqrt(n_stores)) * 3))
-    dept_emb_dim = min(50, max(16, int(np.sqrt(n_depts)) * 2))
+    store_emb_dim = min(50, max(20, int(np.sqrt(n_stores)) * 4))
+    dept_emb_dim = min(50, max(20, int(np.sqrt(n_depts)) * 3))
     
     print(f"\n{'='*70}")
     print(f"Configuración del modelo Transformer")
@@ -229,12 +269,14 @@ def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_dep
     print(f"\n- Input size (sin Store/Dept): {input_size}")
     print(f"- n_stores: {n_stores}, embedding_dim: {store_emb_dim}")
     print(f"- n_depts: {n_depts}, embedding_dim: {dept_emb_dim}")
-    print(f"- d_model: 128")
+    print(f"- d_model: 256 (antes 128)")
     print(f"- nhead: 4")
     print(f"- Encoder layers: 3")
     print(f"- Decoder layers: 3")
+    print(f"- dim_feedforward: 512 (antes 256)")
+    print(f"- Dropout: 0.15")
     print(f"- Seq_len: {seq_len}")
-    print(f"- Batch size: {batch_size}")
+    print(f"- Batch size: {batch_size} (antes 128)")
     print(f"- Learning rate: {lr}")
     print(f"- Device: {device}")
     
@@ -244,12 +286,12 @@ def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_dep
         n_depts=n_depts,
         store_emb_dim=store_emb_dim,
         dept_emb_dim=dept_emb_dim,
-        d_model=128,
+        d_model=256,
         nhead=4,
         num_encoder_layers=3,
         num_decoder_layers=3,
-        dim_feedforward=256,
-        dropout=0.3,
+        dim_feedforward=512,
+        dropout=0.15,
         seq_len=seq_len
     ).to(device)
     
@@ -259,15 +301,30 @@ def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_dep
     print(f"- Total parámetros: {total_params:,}")
     print(f"- Parámetros entrenables: {trainable_params:,}")
     
-    # Optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4, betas=(0.9, 0.999))
-    
-    # Scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=10, T_mult=2, eta_min=1e-6
+    # Optimizer con weight decay ajustado
+    optimizer = torch.optim.AdamW(
+        model.parameters(), 
+        lr=lr, 
+        weight_decay=5e-5,  # Reducido
+        betas=(0.9, 0.98),  # Betas optimizados para transformers
+        eps=1e-9
     )
     
-    criterion = nn.MSELoss()
+    # Warmup scheduler + Cosine Annealing
+    warmup_epochs = 5
+    total_steps = len(train_loader) * epochs
+    warmup_steps = len(train_loader) * warmup_epochs
+    
+    def lr_lambda(current_step):
+        if current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+        progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+    
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    
+    # Loss function con smoothing
+    criterion = nn.SmoothL1Loss(beta=1.0)  # Más robusto que MSE
     
     # Training loop
     best_val_loss = float('inf')
@@ -275,9 +332,10 @@ def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_dep
     patience_counter = 0
     train_losses = []
     val_losses = []
+    current_step = 0
     
     print(f"\n{'='*70}")
-    print(f"Iniciando entrenamiento")
+    print(f"Iniciando entrenamiento con warmup")
     print(f"{'='*70}")
     
     for epoch in range(epochs):
@@ -294,11 +352,14 @@ def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_dep
             loss = criterion(predictions, y_batch)
             loss.backward()
             
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            # Gradient clipping más suave
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             
             optimizer.step()
+            scheduler.step()
+            
             train_loss += loss.item()
+            current_step += 1
         
         train_loss /= len(train_loader)
         train_losses.append(train_loss)
@@ -326,9 +387,6 @@ def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_dep
         # Concatenar predicciones
         val_preds = np.concatenate(val_preds)
         val_actuals = np.concatenate(val_actuals)
-        
-        # Update learning rate
-        scheduler.step()
         
         # Print con detalles
         if epoch == 0 or (epoch + 1) % 5 == 0:
@@ -536,7 +594,7 @@ if __name__ == "__main__":
     print(f"- y_train_scaled: min={y_train_scaled.min():.4f}, max={y_train_scaled.max():.4f}, "
           f"mean={y_train_scaled.mean():.4f}, std={y_train_scaled.std():.4f}")
     
-    # Combinar
+    # Combinar X e y para crear secuencias
     train_data_scaled = np.concatenate([X_train_scaled, y_train_scaled], axis=1)
     val_data_scaled = np.concatenate([X_val_scaled, y_val_scaled], axis=1)
     
@@ -567,15 +625,15 @@ if __name__ == "__main__":
         n_depts=n_depts,
         seq_len=SEQ_LEN,
         epochs=80,
-        batch_size=128,
-        lr=0.001
+        batch_size=256,
+        lr=0.0005
     )
     
     # Evaluar
     results = evaluate_transformer(model, X_val_seq, y_val_seq, is_holiday=is_holiday_val, 
                                     scaler=scaler_y, verbose=True)
     
-    # Guardar resultado individual
+    # Guardar resultados
     with open(f'transformer_results.json', 'w') as f:
         json.dump({
             'wmape': float(results['wmape']),
