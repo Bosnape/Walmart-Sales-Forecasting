@@ -80,7 +80,7 @@ class LSTMForecaster(nn.Module):
         
         return prediction
 
-# Creacion de secuencias (con seq_len=8)
+# Creacion de secuencias
 def create_sequences_grouped(data, seq_len=8, verbose=True):
     """Crea secuencias agrupadas por Store-Dept"""
     X, y = [], []
@@ -141,12 +141,8 @@ class WalmartDataset(Dataset):
         return self.X[idx], self.y[idx]
 
 # Training
-def train_lstm_forecaster(X_train, y_train, X_val, y_val, 
-                          n_stores, n_depts,
-                          seq_len=8,
-                          epochs=100, 
-                          batch_size=128,
-                          lr=0.001):
+def train_lstm_forecaster(X_train, y_train, X_val, y_val, n_stores, n_depts,
+                          seq_len=8, epochs=100, batch_size=128, lr=0.001):
     """Entrena LSTM con diagnosticos detallados"""
     
     # DataLoaders
@@ -522,7 +518,7 @@ if __name__ == "__main__":
     
     # Evaluar
     results = evaluate_lstm(model, X_val_seq, y_val_seq, is_holiday=is_holiday_val, 
-                           scaler=scaler_y, verbose=True)
+                            scaler=scaler_y, verbose=True)
     
     # Guardar resultados
     with open('lstm_results.json', 'w') as f:
