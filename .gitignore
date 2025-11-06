@@ -4,3 +4,6 @@ sampleSubmission.csv
 *.pkl
 *.pyc
 __pycache__/
+visualize_predictions.py
+preprocessor.py
+compare_performance.py

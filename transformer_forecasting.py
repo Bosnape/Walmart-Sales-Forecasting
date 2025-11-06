@@ -328,7 +328,7 @@ def train_transformer_forecaster(X_train, y_train, X_val, y_val, n_stores, n_dep
     
     # Training loop
     best_val_loss = float('inf')
-    patience = 20
+    patience = 25
     patience_counter = 0
     train_losses = []
     val_losses = []
