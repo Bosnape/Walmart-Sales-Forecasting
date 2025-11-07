@@ -6,3 +6,5 @@ torch
 tensorflow
 seaborn
 statsmodels
+streamlit
+plotly
