@@ -8,6 +8,13 @@ El proyecto compara dos arquitecturas de redes neuronales: LSTM (Long Short-Term
 
 Los datos provienen de la competencia de Kaggle "Walmart Recruiting - Store Sales Forecasting" (https://www.kaggle.com/competitions/walmart-recruiting-store-sales-forecasting).
 
+## Autores
+
+- **Pablo Cabrejos**
+- **Sofía Flores**
+- **Isabella Camacho**
+- **Santiago Gómez**
+
 ## Estructura del Proyecto
 
 ```
@@ -33,26 +40,28 @@ Walmart-Sales-Forecasting/
 │   └── predictions_visualization_transformer.png
 │
 ├── data_analysis_and_preparation.ipynb  # Análisis y preparación de datos
-├── preprocessor.py                 # Módulo de procesamiento
 ├── lstm_baseline.py                # Entrenamiento modelo LSTM
 ├── transformer_forecasting.py      # Entrenamiento modelo Transformer
 ├── lstm_test.py                    # Predicciones con LSTM
 ├── transformer_test.py             # Predicciones con Transformer
-└── requirements.txt                # Dependencias del proyecto
+├── app.py                          # Dashboard interactivo Streamlit
+├── requirements.txt                # Dependencias del proyecto
+├── README.md
 ```
 
 ## Dependencias
 
 El proyecto requiere las siguientes librerías de Python:
 
-- matplotlib
-- numpy
-- pandas
-- scikit-learn
-- torch
-- tensorflow
-- seaborn
-- statsmodels
+- **matplotlib**
+- **numpy**
+- **pandas**
+- **scikit-learn**
+- **torch** (PyTorch)
+- **seaborn**
+- **statsmodels**
+- **streamlit**
+- **plotly**
 
 Para instalar todas las dependencias, ejecute:
 
@@ -73,6 +82,7 @@ jupyter notebook data_analysis_and_preparation.ipynb
 ```
 
 Este notebook realiza:
+
 - Carga y fusión de los datasets (train.csv, stores.csv, features.csv)
 - Análisis exploratorio de datos (EDA)
 - Procesamiento y transformación de características
@@ -96,6 +106,7 @@ python transformer_forecasting.py
 ```
 
 Ambos scripts:
+
 - Cargan los datos procesados desde `data/processed_data.pkl`
 - Crean secuencias temporales agrupadas por Store-Dept
 - Entrenan el modelo con early stopping
@@ -119,11 +130,20 @@ python transformer_test.py
 ```
 
 Estos scripts:
-- Cargar el modelo entrenado
-- Procesar el conjunto test.csv
-- Generar predicciones usando estrategia rolling window
-- Crear archivos de submission en formato CSV
-- Generar visualizaciones de las predicciones
+
+- Cargan el modelo entrenado
+- Procesan el conjunto test.csv
+- Generan predicciones usando estrategia rolling window
+- Crean archivos de submission en formato CSV en `predictions/`
+- Generan visualizaciones de las predicciones
+
+### 4. Dashboard Interactivo (Streamlit)
+
+El proyecto incluye un dashboard interactivo para explorar los resultados:
+
+```bash
+streamlit run app.py
+```
 
 ## Resultados Esperados
 
@@ -143,6 +163,7 @@ Los modelos se evalúan en un conjunto de validación (20% del train.csv) ya que
 Basado en los resultados de múltiples ejecuciones almacenados en `train_results/`:
 
 **Modelo LSTM:**
+
 - WMAPE promedio: ~12.8%
 - WMAE promedio: ~$2,040
 - MAPE promedio: ~36.2%
@@ -150,6 +171,7 @@ Basado en los resultados de múltiples ejecuciones almacenados en `train_results
 - El modelo LSTM muestra un rendimiento consistente y superior en métricas ponderadas (WMAPE, WMAE)
 
 **Modelo Transformer:**
+
 - WMAPE promedio: ~14.6%
 - WMAE promedio: ~$2,320
 - MAPE promedio: ~32.6%
@@ -166,12 +188,14 @@ El proyecto incluye visualizaciones comparativas en `model_comparisons/`:
 - **temporal_series.png**: Series temporales mostrando la evolución de predicciones y valores reales
 
 Las predicciones finales en test.csv se visualizan en `predictions/`:
+
 - **predictions_visualization_lstm.png**: Visualización de predicciones del modelo LSTM
 - **predictions_visualization_transformer.png**: Visualización de predicciones del modelo Transformer
 
 ### Archivos de Submission
 
 Los archivos de submission generados (`predictions/submission_lstm.csv` y `predictions/submission_transformer.csv`) contienen las predicciones para el conjunto test.csv en el formato requerido por la competencia de Kaggle, con columnas:
+
 - `Id`: Identificador único (Store_Dept_Date)
 - `Weekly_Sales`: Predicción de ventas semanales
 
@@ -188,6 +212,7 @@ La división es temporal para respetar la naturaleza de series temporales y evit
 ### Características del Modelo
 
 Ambos modelos utilizan:
+
 - Embeddings para Store y Dept
 - Secuencias temporales de longitud 8 semanas
 - Normalización con RobustScaler
@@ -215,8 +240,12 @@ Ambos modelos utilizan:
 Este proyecto utiliza datos de la competencia de Kaggle:
 
 **Walmart Recruiting - Store Sales Forecasting**
+
 - URL: https://www.kaggle.com/competitions/walmart-recruiting-store-sales-forecasting
 - Descripción: Competencia de reclutamiento de Walmart para predecir ventas de departamentos por tienda
 
 Los datos incluyen información histórica de ventas de 45 tiendas Walmart desde febrero de 2010 hasta julio de 2013, con características adicionales como información de tiendas, variables económicas regionales y datos de promociones (markdowns).
 
+## Licencia
+
+Este proyecto es parte de un curso académico de Inteligencia Artificial en la Universidad EAFIT.
