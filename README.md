@@ -4,7 +4,7 @@
 
 Este proyecto implementa modelos de aprendizaje profundo para la predicción de ventas semanales de tiendas Walmart. El objetivo es desarrollar sistemas de pronóstico capaces de predecir las ventas de cada departamento por tienda, considerando factores temporales, promocionales y económicos.
 
-El proyecto compara dos arquitecturas de redes neuronales: LSTM (Long Short-Term Memory) y Transformer, evaluando su capacidad para capturar patrones temporales y dependencias complejas en series de tiempo de ventas.
+El proyecto compara dos arquitecturas de redes neuronales: LSTM (Long Short-Term Memory) y Transformer con arquitectura encoder-decoder y 4 cabezas de atención, evaluando su capacidad para capturar patrones temporales y dependencias complejas en series de tiempo de ventas.
 
 Los datos provienen de la competencia de Kaggle "Walmart Recruiting - Store Sales Forecasting" (https://www.kaggle.com/competitions/walmart-recruiting-store-sales-forecasting).
 
@@ -16,8 +16,7 @@ Walmart-Sales-Forecasting/
 │   ├── train.csv                  # Conjunto de entrenamiento
 │   ├── test.csv                   # Conjunto de prueba (sin etiquetas)
 │   ├── stores.csv                 # Información de tiendas
-│   ├── features.csv               # Características adicionales
-│   └── sampleSubmission.csv       # Formato de submission
+│   └── features.csv               # Características adicionales
 ├── train_results/                 # Resultados de entrenamiento
 │   ├── LSTM/                      # Resultados de modelos LSTM
 │   └── Transformer/               # Resultados de modelos Transformer
