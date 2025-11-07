@@ -46,7 +46,7 @@ Walmart-Sales-Forecasting/
 ├── transformer_test.py             # Predicciones con Transformer
 ├── app.py                          # Dashboard interactivo Streamlit
 ├── requirements.txt                # Dependencias del proyecto
-├── README.md
+└── README.md
 ```
 
 ## Dependencias
