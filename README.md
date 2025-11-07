@@ -17,17 +17,21 @@ Walmart-Sales-Forecasting/
 │   ├── test.csv                   # Conjunto de prueba (sin etiquetas)
 │   ├── stores.csv                 # Información de tiendas
 │   └── features.csv               # Características adicionales
+│
 ├── train_results/                 # Resultados de entrenamiento
 │   ├── LSTM/                      # Resultados de modelos LSTM
 │   └── Transformer/               # Resultados de modelos Transformer
+│
 ├── model_comparisons/             # Visualizaciones comparativas
 │   ├── scatter_plots.png          # Gráficos de dispersión
 │   └── temporal_series.png        # Series temporales
+│
 ├── predictions/                   # Predicciones en test.csv
 │   ├── submission_lstm.csv         # Predicciones LSTM
 │   ├── submission_transformer.csv  # Predicciones Transformer
 │   ├── predictions_visualization_lstm.png
 │   └── predictions_visualization_transformer.png
+│
 ├── data_analysis_and_preparation.ipynb  # Análisis y preparación de datos
 ├── preprocessor.py                 # Módulo de procesamiento
 ├── lstm_baseline.py                # Entrenamiento modelo LSTM
